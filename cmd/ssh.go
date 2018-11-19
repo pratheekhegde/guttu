@@ -27,21 +27,23 @@ import (
 	"log"
 	"net/http"
 	"os"
+	"os/exec"
 	"strconv"
 	"strings"
+	"syscall"
 
 	"github.com/howeyc/gopass"
 	"github.com/olekukonko/tablewriter"
 	"github.com/spf13/cobra"
 )
 
-// ErrorResponse struct for error response from vault API
-type ErrorResponse struct {
+// VaultErrorResponse struct for error response from vault API
+type VaultErrorResponse struct {
 	Errors []string
 }
 
-// LoginResponse struct for success response from vault API after logging in
-type LoginResponse struct {
+// VaultAuthLoginResponse struct for success response from vault API after logging in
+type VaultAuthLoginResponse struct {
 	RequestID     string      `json:"request_id"`
 	LeaseID       string      `json:"lease_id"`
 	Renewable     bool        `json:"renewable"`
@@ -63,12 +65,30 @@ type LoginResponse struct {
 	} `json:"auth"`
 }
 
+// VaultSSHOTPResponse struct for valid otp response
+type VaultSSHOTPResponse struct {
+	LeaseID       string `json:"lease_id"`
+	Renewable     bool   `json:"renewable"`
+	LeaseDuration int    `json:"lease_duration"`
+	Data          struct {
+		IP       string `json:"ip"`
+		Key      string `json:"key"`
+		KeyType  string `json:"key_type"`
+		Port     int    `json:"port"`
+		Username string `json:"username"`
+	} `json:"data"`
+	Warnings interface{} `json:"warnings"`
+	Auth     interface{} `json:"auth"`
+}
+
 var selectedServerNumber int
+var vaultUserToken string
+var sshOTPKey string
 
 // sshCmd represents the ssh command
 var sshCmd = &cobra.Command{
 	Use:   "ssh",
-	Short: "A brief description of your command",
+	Short: "Login to a Server with Vault OTP",
 	Long: `A longer description that spans multiple lines and likely contains examples
 and usage of using your command. For example:
 
@@ -78,6 +98,7 @@ to quickly create a Cobra application.`,
 	Run: func(cmd *cobra.Command, args []string) {
 		showVaultLoginPrompt()
 		showServerSelection()
+		generateVaultCredentials()
 		loginToServer()
 	},
 }
@@ -108,14 +129,14 @@ func showVaultLoginPrompt() {
 		log.Fatal(readErr)
 	}
 	if resp.StatusCode == 200 {
-		loginResponse := LoginResponse{}
-		json.Unmarshal(responseBody, &loginResponse)
+		VaultAuthloginResponse := VaultAuthLoginResponse{}
+		json.Unmarshal(responseBody, &VaultAuthloginResponse)
 		log.Println("Logged into Vault...")
-		// fmt.Printf("Your Token: %s", loginResponse.Auth.ClientToken)
+		vaultUserToken = VaultAuthloginResponse.Auth.ClientToken
 	} else {
-		errorResponse := ErrorResponse{}
-		json.Unmarshal(responseBody, &errorResponse)
-		fmt.Printf("Error: %s\n", errorResponse.Errors[0])
+		VaulterrorResponse := VaultErrorResponse{}
+		json.Unmarshal(responseBody, &VaulterrorResponse)
+		fmt.Printf("Error: %s\n", VaulterrorResponse.Errors[0])
 		os.Exit(1)
 	}
 }
@@ -146,10 +167,54 @@ func showServerSelection() {
 		}
 	}
 }
+func generateVaultCredentials() {
+	fmt.Println("You selected", selectedServerNumber)
+	fmt.Println("Generating OTP from vault for", cfg.Servers[selectedServerNumber-1].ServerName, "...")
+
+	payload := fmt.Sprintf(`{"ip": "%s"}`, cfg.Servers[selectedServerNumber-1].IP)
+	body := strings.NewReader(payload)
+
+	req, err := http.NewRequest("POST", cfg.VaultAddress+"/v1/ssh/creds/"+cfg.Servers[selectedServerNumber].VaultRole, body)
+	if err != nil {
+		// handle err
+	}
+	req.Header.Set("X-Vault-Token", vaultUserToken)
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		// handle err
+	}
+	defer resp.Body.Close()
+	responseBody, readErr := ioutil.ReadAll(resp.Body)
+	if readErr != nil {
+		log.Fatal(readErr)
+	}
+	if resp.StatusCode == 200 {
+		otpResponse := VaultSSHOTPResponse{}
+		json.Unmarshal(responseBody, &otpResponse)
+		sshOTPKey = otpResponse.Data.Key
+		fmt.Println("Generated OTP for", cfg.Servers[selectedServerNumber-1].ServerName, "...")
+
+	} else {
+		VaulterrorResponse := VaultErrorResponse{}
+		json.Unmarshal(responseBody, &VaulterrorResponse)
+		fmt.Printf("Error: %s\n", VaulterrorResponse.Errors[0])
+		os.Exit(1)
+	}
+}
 
 func loginToServer() {
-	fmt.Println("You selected", selectedServerNumber)
-	fmt.Println("Logging into server", cfg.Servers[selectedServerNumber-1].ServerName, "...")
+	binary, lookErr := exec.LookPath("ssh")
+	if lookErr != nil {
+		panic(lookErr)
+	}
+	args := []string{"ssh", cfg.Servers[selectedServerNumber-1].LoginUsername + "@" + cfg.Servers[selectedServerNumber-1].IP}
+	env := os.Environ()
+	execErr := syscall.Exec(binary, args, env)
+	if execErr != nil {
+		panic(execErr)
+	}
 }
 func init() {
 	rootCmd.AddCommand(sshCmd)
