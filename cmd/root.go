@@ -83,8 +83,9 @@ func initConfig() {
 		}
 
 		// Search config in home directory with name ".guttu" (without extension).
-		viper.AddConfigPath(home)
 		viper.SetConfigName(".guttu")
+		viper.AddConfigPath(".")  // look for config in the working directory
+		viper.AddConfigPath(home) // then look form home directory
 	}
 
 	viper.AutomaticEnv() // read in environment variables that match

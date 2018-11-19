@@ -26,12 +26,52 @@ import (
 	"io/ioutil"
 	"log"
 	"net/http"
+	"os"
+	"strconv"
 	"strings"
 
 	"github.com/howeyc/gopass"
+	"github.com/olekukonko/tablewriter"
 	"github.com/spf13/cobra"
 	"github.com/spf13/viper"
 )
+
+// ServerList struct for ssh server
+type ServerList []struct {
+	ServerName string `mapstructure:"server_name"`
+	IP         string `mapstructure:"ip"`
+}
+
+// ErrorResponse struct for error response from vault API
+type ErrorResponse struct {
+	Errors []string
+}
+
+// LoginResponse struct for success response from vault API after logging in
+type LoginResponse struct {
+	RequestID     string      `json:"request_id"`
+	LeaseID       string      `json:"lease_id"`
+	Renewable     bool        `json:"renewable"`
+	LeaseDuration int         `json:"lease_duration"`
+	Data          interface{} `json:"data"`
+	WrapInfo      interface{} `json:"wrap_info"`
+	Warnings      interface{} `json:"warnings"`
+	Auth          struct {
+		ClientToken   string   `json:"client_token"`
+		Accessor      string   `json:"accessor"`
+		Policies      []string `json:"policies"`
+		TokenPolicies []string `json:"token_policies"`
+		Metadata      struct {
+			Username string `json:"username"`
+		} `json:"metadata"`
+		LeaseDuration int    `json:"lease_duration"`
+		Renewable     bool   `json:"renewable"`
+		EntityID      string `json:"entity_id"`
+	} `json:"auth"`
+}
+
+var serverList ServerList
+var selectedServerNumber int
 
 // sshCmd represents the ssh command
 var sshCmd = &cobra.Command{
@@ -44,65 +84,80 @@ Cobra is a CLI library for Go that empowers applications.
 This application is a tool to generate the needed files
 to quickly create a Cobra application.`,
 	Run: func(cmd *cobra.Command, args []string) {
-		var vaultUsername string
-		fmt.Print("Enter your Vault user name: ")
-		fmt.Scanln(&vaultUsername)
-		fmt.Print("Enter your Vault password: ")
-		vaultPassword, _ := gopass.GetPasswd()
-		fmt.Println("Logging into Vault...")
-		payload := fmt.Sprintf(`{"password": "%s"}`, vaultPassword)
-		body := strings.NewReader(payload)
-		req, err := http.NewRequest("POST", viper.GetString("vault_address")+"/v1/auth/userpass/login/"+vaultUsername, body)
-		if err != nil {
-			// handle err
-		}
-		req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
-
-		resp, err := http.DefaultClient.Do(req)
-		if err != nil {
-			// handle err
-		}
-		defer resp.Body.Close()
-		type ErrorResponse struct {
-			Errors []string
-		}
-		type LoginResponse struct {
-			RequestID     string      `json:"request_id"`
-			LeaseID       string      `json:"lease_id"`
-			Renewable     bool        `json:"renewable"`
-			LeaseDuration int         `json:"lease_duration"`
-			Data          interface{} `json:"data"`
-			WrapInfo      interface{} `json:"wrap_info"`
-			Warnings      interface{} `json:"warnings"`
-			Auth          struct {
-				ClientToken   string   `json:"client_token"`
-				Accessor      string   `json:"accessor"`
-				Policies      []string `json:"policies"`
-				TokenPolicies []string `json:"token_policies"`
-				Metadata      struct {
-					Username string `json:"username"`
-				} `json:"metadata"`
-				LeaseDuration int    `json:"lease_duration"`
-				Renewable     bool   `json:"renewable"`
-				EntityID      string `json:"entity_id"`
-			} `json:"auth"`
-		}
-		responseBody, readErr := ioutil.ReadAll(resp.Body)
-		if readErr != nil {
-			log.Fatal(readErr)
-		}
-		if resp.StatusCode == 200 {
-			loginResponse := LoginResponse{}
-			json.Unmarshal(responseBody, &loginResponse)
-			fmt.Printf("Your Token: %s", loginResponse.Auth.ClientToken)
-		} else {
-			errorResponse := ErrorResponse{}
-			json.Unmarshal(responseBody, &errorResponse)
-			fmt.Printf("Error: %s", errorResponse.Errors[0])
-		}
+		showVaultLoginPrompt()
+		showServerSelection()
+		loginToServer()
 	},
 }
 
+func showVaultLoginPrompt() {
+	var vaultUsername string
+	fmt.Print("Enter your Vault user name: ")
+	fmt.Scanln(&vaultUsername)
+	fmt.Print("Enter your Vault password: ")
+	vaultPassword, _ := gopass.GetPasswd()
+	log.Println("Logging into Vault...")
+	payload := fmt.Sprintf(`{"password": "%s"}`, vaultPassword)
+	body := strings.NewReader(payload)
+	req, err := http.NewRequest("POST", viper.GetString("vault_address")+"/v1/auth/userpass/login/"+vaultUsername, body)
+	if err != nil {
+		// handle err
+	}
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		// handle err
+	}
+	defer resp.Body.Close()
+
+	responseBody, readErr := ioutil.ReadAll(resp.Body)
+	if readErr != nil {
+		log.Fatal(readErr)
+	}
+	if resp.StatusCode == 200 {
+		loginResponse := LoginResponse{}
+		json.Unmarshal(responseBody, &loginResponse)
+		log.Println("Logged into Vault...")
+		// fmt.Printf("Your Token: %s", loginResponse.Auth.ClientToken)
+	} else {
+		errorResponse := ErrorResponse{}
+		json.Unmarshal(responseBody, &errorResponse)
+		fmt.Printf("Error: %s\n", errorResponse.Errors[0])
+		os.Exit(1)
+	}
+}
+
+func showServerSelection() {
+	viper.UnmarshalKey("servers", &serverList)
+
+	table := tablewriter.NewWriter(os.Stdout)
+	table.SetHeader([]string{"Number", "Server Name", "IP"})
+	table.SetCaption(true, "Enter the number of the server you want to log in. eg: 1")
+	for key, s := range serverList {
+		table.Append([]string{strconv.Itoa(key + 1), s.ServerName, s.IP})
+	}
+	table.Render() // Send output
+}
+
+func loginToServer() {
+	attempt := 1
+	maxAttempt := 3
+	for true {
+		fmt.Scanln(&selectedServerNumber)
+		if attempt == maxAttempt {
+			println("Reached max invalid attempt", maxAttempt)
+			os.Exit(1)
+		}
+		if selectedServerNumber < 1 || selectedServerNumber > len(serverList) {
+			attempt++
+			fmt.Printf("Please enter a valid number between %d and %d!\n", 1, len(serverList)-1)
+		} else {
+			break
+		}
+	}
+
+}
 func init() {
 	rootCmd.AddCommand(sshCmd)
 
