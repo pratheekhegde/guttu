@@ -31,6 +31,19 @@ import (
 
 var cfgFile string
 
+// GuttuConfigStruct struct for holding configuration
+type GuttuConfigStruct struct {
+	VaultAddress string `mapstructure:"vault_address"`
+	Servers      []struct {
+		IP            string `mapstructure:"ip"`
+		ServerName    string `mapstructure:"server_name"`
+		LoginUsername string `mapstructure:"login_username"`
+		VaultRole     string `mapstructure:"vault_role"`
+	} `mapstructure:"servers"`
+}
+
+var cfg GuttuConfigStruct
+
 // rootCmd represents the base command when called without any subcommands
 var rootCmd = &cobra.Command{
 	Version: "0.0.1",
@@ -92,7 +105,8 @@ func initConfig() {
 
 	// If a config file is found, read it in.
 	if err := viper.ReadInConfig(); err == nil {
+		viper.Unmarshal(&cfg)
 		fmt.Println("Using config file:", viper.ConfigFileUsed())
-		fmt.Println("Using Vault Address:", viper.Get("vault_address"))
+		fmt.Println("Using Vault Address:", cfg.VaultAddress)
 	}
 }

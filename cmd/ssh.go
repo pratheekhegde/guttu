@@ -33,14 +33,7 @@ import (
 	"github.com/howeyc/gopass"
 	"github.com/olekukonko/tablewriter"
 	"github.com/spf13/cobra"
-	"github.com/spf13/viper"
 )
-
-// ServerList struct for ssh server
-type ServerList []struct {
-	ServerName string `mapstructure:"server_name"`
-	IP         string `mapstructure:"ip"`
-}
 
 // ErrorResponse struct for error response from vault API
 type ErrorResponse struct {
@@ -70,7 +63,6 @@ type LoginResponse struct {
 	} `json:"auth"`
 }
 
-var serverList ServerList
 var selectedServerNumber int
 
 // sshCmd represents the ssh command
@@ -99,7 +91,7 @@ func showVaultLoginPrompt() {
 	log.Println("Logging into Vault...")
 	payload := fmt.Sprintf(`{"password": "%s"}`, vaultPassword)
 	body := strings.NewReader(payload)
-	req, err := http.NewRequest("POST", viper.GetString("vault_address")+"/v1/auth/userpass/login/"+vaultUsername, body)
+	req, err := http.NewRequest("POST", cfg.VaultAddress+"/v1/auth/userpass/login/"+vaultUsername, body)
 	if err != nil {
 		// handle err
 	}
@@ -129,34 +121,35 @@ func showVaultLoginPrompt() {
 }
 
 func showServerSelection() {
-	viper.UnmarshalKey("servers", &serverList)
+	attempt := 1
+	maxAttempt := 3
 
 	table := tablewriter.NewWriter(os.Stdout)
 	table.SetHeader([]string{"Number", "Server Name", "IP"})
 	table.SetCaption(true, "Enter the number of the server you want to log in. eg: 1")
-	for key, s := range serverList {
+	for key, s := range cfg.Servers {
 		table.Append([]string{strconv.Itoa(key + 1), s.ServerName, s.IP})
 	}
 	table.Render() // Send output
-}
-
-func loginToServer() {
-	attempt := 1
-	maxAttempt := 3
+	// get server number from the prompt
 	for true {
 		fmt.Scanln(&selectedServerNumber)
 		if attempt == maxAttempt {
 			println("Reached max invalid attempt", maxAttempt)
 			os.Exit(1)
 		}
-		if selectedServerNumber < 1 || selectedServerNumber > len(serverList) {
+		if selectedServerNumber < 1 || selectedServerNumber > len(cfg.Servers) {
 			attempt++
-			fmt.Printf("Please enter a valid number between %d and %d!\n", 1, len(serverList)-1)
+			fmt.Printf("Please enter a valid number between %d and %d!\n", 1, len(cfg.Servers))
 		} else {
 			break
 		}
 	}
+}
 
+func loginToServer() {
+	fmt.Println("You selected", selectedServerNumber)
+	fmt.Println("Logging into server", cfg.Servers[selectedServerNumber-1].ServerName, "...")
 }
 func init() {
 	rootCmd.AddCommand(sshCmd)
