@@ -23,14 +23,15 @@ package cmd
 import (
 	"encoding/json"
 	"fmt"
+	"io"
 	"io/ioutil"
 	"log"
 	"net/http"
 	"os"
-	"os/exec"
 	"strconv"
 	"strings"
-	"syscall"
+
+	"golang.org/x/crypto/ssh"
 
 	"github.com/howeyc/gopass"
 	"github.com/olekukonko/tablewriter"
@@ -205,17 +206,71 @@ func generateVaultCredentials() {
 }
 
 func loginToServer() {
-	binary, lookErr := exec.LookPath("ssh")
-	if lookErr != nil {
-		panic(lookErr)
+
+	sshConfig := &ssh.ClientConfig{
+		User: cfg.Servers[selectedServerNumber-1].LoginUsername,
+		Auth: []ssh.AuthMethod{
+			ssh.RetryableAuthMethod(
+				ssh.KeyboardInteractive(func(user, instruction string, questions []string, echos []bool) ([]string, error) {
+					// Just send the password back for all questions
+					answers := make([]string, len(questions))
+					for n := range questions {
+						// fmt.Printf("Got question: %s\n", q)
+						// fmt.Printf("Entering password: %s\n", sshOTPKey)
+						answers[n] = sshOTPKey
+					}
+					return answers, nil
+				}),
+				1,
+			),
+		},
+		HostKeyCallback: ssh.InsecureIgnoreHostKey(),
 	}
-	args := []string{"ssh", cfg.Servers[selectedServerNumber-1].LoginUsername + "@" + cfg.Servers[selectedServerNumber-1].IP}
-	env := os.Environ()
-	execErr := syscall.Exec(binary, args, env)
-	if execErr != nil {
-		panic(execErr)
+	connection, err := ssh.Dial("tcp", cfg.Servers[selectedServerNumber-1].IP+":22", sshConfig)
+	if err != nil {
+		log.Fatalln(err)
 	}
+
+	session, err := connection.NewSession()
+	if err != nil {
+		log.Fatalln(err)
+	}
+
+	modes := ssh.TerminalModes{
+		ssh.ECHO:          0,     // disable echoing
+		ssh.TTY_OP_ISPEED: 14400, // input speed = 14.4kbaud
+		ssh.TTY_OP_OSPEED: 14400, // output speed = 14.4kbaud
+	}
+
+	if err := session.RequestPty("xterm", 80, 40, modes); err != nil {
+		session.Close()
+		log.Fatalf("request for pseudo terminal failed: %s", err)
+	}
+
+	stdin, err := session.StdinPipe()
+	if err != nil {
+		log.Fatalf("Unable to setup stdin for session: %v", err)
+	}
+	go io.Copy(stdin, os.Stdin)
+
+	stdout, err := session.StdoutPipe()
+	if err != nil {
+		log.Fatalf("Unable to setup stdout for session: %v", err)
+	}
+	go io.Copy(os.Stdout, stdout)
+
+	stderr, err := session.StderrPipe()
+	if err != nil {
+		log.Fatalf("Unable to setup stderr for session: %v", err)
+	}
+	go io.Copy(os.Stderr, stderr)
+
+	// err = session.Run("1")
+	fmt.Println("Logged in to ", cfg.Servers[selectedServerNumber-1].ServerName, "...")
+	session.Shell()
+	session.Wait()
 }
+
 func init() {
 	rootCmd.AddCommand(sshCmd)
 
