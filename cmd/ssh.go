@@ -28,8 +28,10 @@ import (
 	"log"
 	"net/http"
 	"os"
+	"os/exec"
 	"strconv"
 	"strings"
+	"syscall"
 
 	"golang.org/x/crypto/ssh"
 
@@ -98,7 +100,8 @@ var sshCmd = &cobra.Command{
 		showVaultLoginPrompt()
 		showServerSelection()
 		generateVaultCredentials()
-		loginToServer()
+		// loginToServer()
+		loginToServerWithSSHPass()
 	},
 }
 
@@ -264,6 +267,20 @@ func loginToServer() {
 	log.Println("Logged in to", cfg.Servers[selectedServerNumber-1].ServerName, "...")
 	session.Shell()
 	session.Wait()
+}
+
+func loginToServerWithSSHPass() {
+	binary, lookErr := exec.LookPath("sshpass")
+	if lookErr != nil {
+		panic(lookErr)
+	}
+	args := []string{"sshpass", "-p", vaultSSHOTPKey, "ssh", cfg.Servers[selectedServerNumber-1].LoginUsername + "@" + cfg.Servers[selectedServerNumber-1].IP}
+	env := os.Environ()
+	execErr := syscall.Exec(binary, args, env)
+	if execErr != nil {
+		panic(execErr)
+	}
+
 }
 
 func init() {
