@@ -48,13 +48,8 @@ var cfg GuttuConfigStruct
 var rootCmd = &cobra.Command{
 	Version: "0.0.1",
 	Use:     "guttu",
-	Short:   "A brief description of your application",
-	Long: `A longer description that spans multiple lines and likely contains
-examples and usage of using your application. For example:
-
-Cobra is a CLI library for Go that empowers applications.
-This application is a tool to generate the needed files
-to quickly create a Cobra application.`,
+	Short:   "Guttu is a HashiCorp Vault helper CLI",
+	Long:    `A minimal CLI wrapper for SSH OTP logins over HashiCorp Vault.`,
 	// Uncomment the following line if your bare application
 	// has an action associated with it:
 	//	Run: func(cmd *cobra.Command, args []string) { },
@@ -77,9 +72,6 @@ func init() {
 	// will be global for your application.
 	rootCmd.PersistentFlags().StringVar(&cfgFile, "config", "", "config file (default is $HOME/.guttu.yaml)")
 
-	// Cobra also supports local flags, which will only run
-	// when this action is called directly.
-	rootCmd.Flags().BoolP("toggle", "t", false, "Help message for toggle")
 }
 
 // initConfig reads in config file and ENV variables if set.
@@ -106,7 +98,5 @@ func initConfig() {
 	// If a config file is found, read it in.
 	if err := viper.ReadInConfig(); err == nil {
 		viper.Unmarshal(&cfg)
-		fmt.Println("Using config file:", viper.ConfigFileUsed())
-		fmt.Println("Using Vault Address:", cfg.VaultAddress)
 	}
 }
